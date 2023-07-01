@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.71"
 clap = "4.3.10"
+colored = "2.0.0"
 crates-index = "0.19.13"
 reqwest = "0.11.18"
+semver = "1.0.17"
 serde = { version = "1.0.164", features = ["derive"] }
 toml = "0.7.5"
