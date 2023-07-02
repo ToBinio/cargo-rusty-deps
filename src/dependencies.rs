@@ -1,17 +1,12 @@
-use std::{fs, thread};
+use std::fmt::{Display, Formatter};
+use std::process::Command;
+use std::thread;
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use colored::Colorize;
-use crates_index::SparseIndex;
-use http::Request;
 use semver::Version;
-use serde::Deserialize;
-use toml::{Table, Value};
 
-#[derive(Deserialize)]
-struct Document {
-    dependencies: Table,
-}
+use crate::versions::{get_latest_version, get_version_diff, version_to_string};
 
 #[derive(Debug)]
 pub struct Dependency {
@@ -20,11 +15,14 @@ pub struct Dependency {
     latest_version: Version,
 }
 
+pub struct Dependencies {
+    dependencies: Vec<Dependency>,
+}
+
 impl Dependency {
     fn new(name: String, version: String) -> anyhow::Result<Dependency> {
         let version = Version::parse(&version)?;
-
-        let latest_version = Dependency::get_latest_version(&name)?;
+        let latest_version = get_latest_version(&name)?;
 
         Ok(Dependency {
             name,
@@ -32,72 +30,44 @@ impl Dependency {
             latest_version,
         })
     }
-
-    fn get_latest_version(name: &str) -> anyhow::Result<Version> {
-        let index = SparseIndex::new_cargo_default()?;
-
-        let req = index.make_cache_request(name)?;
-
-        let (parts, _) = req.into_parts();
-        let req = Request::from_parts(parts, vec![]);
-
-        let req: reqwest::blocking::Request = req.try_into().unwrap();
-
-        let client = reqwest::blocking::ClientBuilder::new().gzip(true).build()?;
-
-        let res = client.execute(req)?;
-
-        let mut builder = http::Response::builder()
-            .status(res.status())
-            .version(res.version());
-
-        builder
-            .headers_mut()
-            .unwrap()
-            .extend(res.headers().iter().map(|(k, v)| (k.clone(), v.clone())));
-
-        let body = res.bytes()?;
-        let res = builder.body(body.to_vec())?;
-
-        index.parse_cache_response(name, res, true)?;
-
-        let krate = index.crate_from_cache(name)?;
-
-        let latest_version = Version::parse(
-            krate
-                .highest_normal_version()
-                .ok_or_else(|| anyhow!("todo"))?
-                .version(),
-        )?;
-
-        Ok(latest_version)
-    }
 }
 
-pub fn get_all_dependencies() -> anyhow::Result<Vec<Dependency>> {
-    let string = fs::read_to_string("Cargo.toml")?;
+pub fn get_all_dependencies() -> anyhow::Result<Dependencies> {
+    let output = Command::new("cargo")
+        .arg("tree")
+        .args(["--depth", "1"])
+        .args(["--prefix", "none"])
+        .output()?;
 
-    let document: Document = toml::from_str(string.as_str())?;
+    let output = String::from_utf8(output.stdout)?;
+
+    let deps = output
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let split: Vec<&str> = line.split(' ').collect();
+
+            Ok((
+                split
+                    .get(0)
+                    .ok_or_else(|| anyhow!("something went not good"))?
+                    .to_string(),
+                split
+                    .get(1)
+                    .ok_or_else(|| anyhow!("something went not good"))?
+                    .to_string(),
+            ))
+        })
+        .collect::<anyhow::Result<Vec<(String, String)>>>()?;
 
     let dependencies: anyhow::Result<Vec<Dependency>> = thread::scope(|scope| {
         let mut threads = vec![];
 
-        for (name, value) in document.dependencies {
-            let thread = scope.spawn(|| {
-                let result: anyhow::Result<String> = match value {
-                    Value::String(version) => Ok(version),
-                    Value::Table(version) => {
-                        let version = version.get("version").ok_or_else(|| anyhow!("todo"))?;
+        for (name, version) in deps {
+            let thread = scope.spawn(move || {
+                let version: String = version.chars().skip(1).collect();
 
-                        match version {
-                            Value::String(version) => Ok(version.to_string()),
-                            _ => bail!("invalid Cargo.toml"),
-                        }
-                    }
-                    _ => bail!("invalid Cargo.toml"),
-                };
-
-                Dependency::new(name, result?)
+                Dependency::new(name, version)
             });
 
             threads.push(thread);
@@ -109,39 +79,53 @@ pub fn get_all_dependencies() -> anyhow::Result<Vec<Dependency>> {
             .collect()
     });
 
-    dependencies
+    Ok(Dependencies {
+        dependencies: dependencies?,
+    })
 }
 
-pub fn print_dependencies(dependencies: &Vec<Dependency>) {
-    const NAME: &str = "Name";
-    const VERSION: &str = "Version";
-    const LATEST_VERSION: &str = "Latest";
+impl Display for Dependencies {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        const NAME: &str = "Name";
+        const VERSION: &str = "Version";
+        const LATEST_VERSION: &str = "Latest";
 
-    let mut name_width = NAME.len();
-    let mut version_width = VERSION.len();
-    let mut latest_width = LATEST_VERSION.len();
+        let mut name_width = NAME.len();
+        let mut version_width = VERSION.len();
 
-    for dependency in dependencies {
-        name_width = name_width.max(dependency.name.len());
-        version_width = version_width.max(dependency.version.to_string().len());
-        latest_width = latest_width.max(dependency.latest_version.to_string().len());
-    }
+        for dependency in &self.dependencies {
+            name_width = name_width.max(dependency.name.len());
+            version_width = version_width.max(dependency.version.to_string().len());
+        }
 
-    name_width += 3;
-    version_width += 3;
-    latest_width += 3;
+        name_width += 3;
+        version_width += 3;
 
-    println!(
-        "{:name_width$}{:version_width$}{:latest_width$}",
-        NAME.bold(),
-        VERSION.bold(),
-        LATEST_VERSION.bold()
-    );
+        let mut lines = vec![];
 
-    for dependency in dependencies {
-        println!(
-            "{:name_width$}{:version_width$}{:latest_width$}",
-            dependency.name, dependency.version, dependency.latest_version
-        );
+        lines.push(format!(
+            "{:name_width$}{:version_width$}{}",
+            NAME.bold(),
+            VERSION.bold(),
+            LATEST_VERSION.bold()
+        ));
+
+        for dependency in &self.dependencies {
+            let version_dif = get_version_diff(&dependency.version, &dependency.latest_version);
+
+            let version_padding = version_width - dependency.version.to_string().len();
+
+            lines.push(format!(
+                "{:name_width$}{}{:version_padding$}{}",
+                dependency.name,
+                version_to_string(&dependency.version, &version_dif),
+                "",
+                version_to_string(&dependency.latest_version, &version_dif)
+            ));
+        }
+
+        f.write_str(&lines.join("\n"))?;
+
+        Ok(())
     }
 }
