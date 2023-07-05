@@ -6,17 +6,14 @@ use anyhow::anyhow;
 use colored::Colorize;
 use semver::Version;
 
-use crate::versions::{get_latest_version, get_version_diff, version_to_string};
+use crate::versions::{get_latest_version, get_version_diff, version_to_string, VersionDiff};
 
 #[derive(Debug)]
 pub struct Dependency {
     name: String,
     version: Version,
     latest_version: Version,
-}
-
-pub struct Dependencies {
-    dependencies: Vec<Dependency>,
+    version_diff: VersionDiff,
 }
 
 impl Dependency {
@@ -24,64 +21,73 @@ impl Dependency {
         let version = Version::parse(&version)?;
         let latest_version = get_latest_version(&name)?;
 
+        let version_diff = get_version_diff(&version, &latest_version);
+
         Ok(Dependency {
             name,
             version,
             latest_version,
+            version_diff,
         })
     }
 }
 
-pub fn get_all_dependencies() -> anyhow::Result<Dependencies> {
-    let output = Command::new("cargo")
-        .arg("tree")
-        .args(["--depth", "1"])
-        .args(["--prefix", "none"])
-        .output()?;
+pub struct Dependencies {
+    dependencies: Vec<Dependency>,
+}
 
-    let output = String::from_utf8(output.stdout)?;
+impl Dependencies {
+    pub fn get_all_dependencies() -> anyhow::Result<Dependencies> {
+        let output = Command::new("cargo")
+            .arg("tree")
+            .args(["--depth", "1"])
+            .args(["--prefix", "none"])
+            .output()?;
 
-    let deps = output
-        .lines()
-        .skip(1)
-        .map(|line| {
-            let split: Vec<&str> = line.split(' ').collect();
+        let output = String::from_utf8(output.stdout)?;
 
-            Ok((
-                split
-                    .get(0)
-                    .ok_or_else(|| anyhow!("something went not good"))?
-                    .to_string(),
-                split
-                    .get(1)
-                    .ok_or_else(|| anyhow!("something went not good"))?
-                    .to_string(),
-            ))
+        let deps = output
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let mut split = line.split(' ');
+
+                Ok((
+                    split
+                        .next()
+                        .ok_or_else(|| anyhow!("something went not good"))?
+                        .to_string(),
+                    split
+                        .next()
+                        .ok_or_else(|| anyhow!("something went not good"))?
+                        .to_string(),
+                ))
+            })
+            .collect::<anyhow::Result<Vec<(String, String)>>>()?;
+
+        let dependencies: anyhow::Result<Vec<Dependency>> = thread::scope(|scope| {
+            let mut threads = vec![];
+
+            for (name, version) in deps {
+                let thread = scope.spawn(move || {
+                    let version: String = version.chars().skip(1).collect();
+
+                    Dependency::new(name, version)
+                });
+
+                threads.push(thread);
+            }
+
+            threads
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect()
+        });
+
+        Ok(Dependencies {
+            dependencies: dependencies?,
         })
-        .collect::<anyhow::Result<Vec<(String, String)>>>()?;
-
-    let dependencies: anyhow::Result<Vec<Dependency>> = thread::scope(|scope| {
-        let mut threads = vec![];
-
-        for (name, version) in deps {
-            let thread = scope.spawn(move || {
-                let version: String = version.chars().skip(1).collect();
-
-                Dependency::new(name, version)
-            });
-
-            threads.push(thread);
-        }
-
-        threads
-            .into_iter()
-            .map(|thread| thread.join().unwrap())
-            .collect()
-    });
-
-    Ok(Dependencies {
-        dependencies: dependencies?,
-    })
+    }
 }
 
 impl Display for Dependencies {
@@ -111,16 +117,14 @@ impl Display for Dependencies {
         ));
 
         for dependency in &self.dependencies {
-            let version_dif = get_version_diff(&dependency.version, &dependency.latest_version);
-
             let version_padding = version_width - dependency.version.to_string().len();
 
             lines.push(format!(
                 "{:name_width$}{}{:version_padding$}{}",
                 dependency.name,
-                version_to_string(&dependency.version, &version_dif),
+                version_to_string(&dependency.version, &dependency.version_diff),
                 "",
-                version_to_string(&dependency.latest_version, &version_dif)
+                version_to_string(&dependency.latest_version, &dependency.version_diff)
             ));
         }
 

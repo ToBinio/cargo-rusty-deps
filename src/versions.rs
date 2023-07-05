@@ -6,10 +6,10 @@ use crates_index::SparseIndex;
 use http::Request;
 use semver::Version;
 
-use crate::versions::VersionDif::Same;
+use crate::versions::VersionDiff::Same;
 
-#[derive(PartialEq)]
-pub enum VersionDif {
+#[derive(PartialEq, Debug)]
+pub enum VersionDiff {
     Major,
     Minor,
     Patch,
@@ -58,31 +58,31 @@ pub fn get_latest_version(name: &str) -> anyhow::Result<Version> {
     Ok(latest_version)
 }
 
-pub fn get_version_diff(version_a: &Version, version_b: &Version) -> VersionDif {
+pub fn get_version_diff(version_a: &Version, version_b: &Version) -> VersionDiff {
     if version_a.major != version_b.major {
-        return VersionDif::Major;
+        return VersionDiff::Major;
     }
 
     if version_a.minor != version_b.minor {
-        return VersionDif::Minor;
+        return VersionDiff::Minor;
     }
 
     if version_a.patch != version_b.patch {
-        return VersionDif::Patch;
+        return VersionDiff::Patch;
     }
 
     if version_a.pre != version_b.pre {
-        return VersionDif::Pre;
+        return VersionDiff::Pre;
     }
 
     if version_a.build != version_b.build {
-        return VersionDif::Build;
+        return VersionDiff::Build;
     }
 
     Same
 }
 
-pub fn version_to_string(version: &Version, version_dif: &VersionDif) -> String {
+pub fn version_to_string(version: &Version, version_dif: &VersionDiff) -> String {
     let mut major = version.major.to_string().normal();
     let mut minor = version.minor.to_string().normal();
     let mut patch = version.patch.to_string().normal();
@@ -90,11 +90,11 @@ pub fn version_to_string(version: &Version, version_dif: &VersionDif) -> String 
     let mut build = version.build.to_string().normal();
 
     match version_dif {
-        VersionDif::Major => major = major.red(),
-        VersionDif::Minor => minor = minor.red(),
-        VersionDif::Patch => patch = patch.red(),
-        VersionDif::Pre => pre = pre.red(),
-        VersionDif::Build => build = build.red(),
+        VersionDiff::Major => major = major.red(),
+        VersionDiff::Minor => minor = minor.red(),
+        VersionDiff::Patch => patch = patch.red(),
+        VersionDiff::Pre => pre = pre.red(),
+        VersionDiff::Build => build = build.red(),
         Same => {}
     }
 
