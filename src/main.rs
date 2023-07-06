@@ -25,7 +25,8 @@ fn main() -> anyhow::Result<()> {
     let mut dependencies = Dependencies::get_all_dependencies()?;
 
     if cli.update {
-        dependencies = dependencies.get_all_outdated();
+        dependencies.outdated();
+        dependencies.update();
     }
 
     println!("{}", dependencies);

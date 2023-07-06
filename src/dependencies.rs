@@ -89,14 +89,26 @@ impl Dependencies {
         })
     }
 
-    pub fn get_all_outdated(self) -> Dependencies {
-        let deps = self
-            .dependencies
-            .into_iter()
-            .filter(|dependency| dependency.version_diff != VersionDiff::Same)
-            .collect();
+    /// remove all non outdated deps
+    /// in other words retain all outdated deps
+    pub fn outdated(&mut self) {
+        self.dependencies
+            .retain(|dependency| dependency.version_diff != VersionDiff::Same);
+    }
 
-        Dependencies { dependencies: deps }
+    pub fn update(&self) {
+        for dependency in &self.dependencies {
+            //todo
+            let _ = Command::new("cargo")
+                .arg("add")
+                .arg(format!(
+                    "{}@{}",
+                    dependency.name,
+                    dependency.latest_version.to_string()
+                ))
+                .output()
+                .expect("oh no");
+        }
     }
 }
 
