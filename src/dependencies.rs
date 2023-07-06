@@ -88,6 +88,16 @@ impl Dependencies {
             dependencies: dependencies?,
         })
     }
+
+    pub fn get_all_outdated(self) -> Dependencies {
+        let deps = self
+            .dependencies
+            .into_iter()
+            .filter(|dependency| dependency.version_diff != VersionDiff::Same)
+            .collect();
+
+        Dependencies { dependencies: deps }
+    }
 }
 
 impl Display for Dependencies {

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.71"
-clap = "4.3.10"
+clap = { version = "4.3.10", features = ["derive"] }
 colored = "2.0.0"
 crates-index = { version = "0.19.13", features = ["sparse-http"] }
 http = "0.2.9"
