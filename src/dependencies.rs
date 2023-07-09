@@ -97,18 +97,19 @@ impl Dependencies {
     }
 
     pub fn update(&self) {
+        let mut command = Command::new("cargo");
+
+        command.arg("add");
+
         for dependency in &self.dependencies {
-            //todo
-            let _ = Command::new("cargo")
-                .arg("add")
-                .arg(format!(
-                    "{}@{}",
-                    dependency.name,
-                    dependency.latest_version.to_string()
-                ))
-                .output()
-                .expect("oh no");
+            command.arg(format!(
+                "{}@{}",
+                dependency.name,
+                dependency.latest_version.to_string()
+            ));
         }
+
+        command.output().expect("oh no");
     }
 }
 

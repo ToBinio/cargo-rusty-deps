@@ -1,5 +1,6 @@
-use crate::dependencies::Dependencies;
 use clap::Parser;
+
+use crate::dependencies::Dependencies;
 
 mod dependencies;
 mod versions;
@@ -16,6 +17,8 @@ enum CargoCli {
 struct RustyDepsArgs {
     #[arg(short, long)]
     update: bool,
+    #[arg(short, long)]
+    outdated: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -24,12 +27,15 @@ fn main() -> anyhow::Result<()> {
 
     let mut dependencies = Dependencies::get_all_dependencies()?;
 
-    if cli.update {
+    if cli.update || cli.outdated {
         dependencies.outdated();
-        dependencies.update();
     }
 
     println!("{}", dependencies);
+
+    if cli.update{
+        dependencies.update();
+    }
 
     Ok(())
 }
